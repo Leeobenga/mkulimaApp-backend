@@ -41,14 +41,15 @@ export const login = async (req, res) => {
         "SELECT * FROM users WHERE email = $1",
         [email]
     );
-
+   
     if (result.rowCount === 0) {
         return res.status(401).json({error: "Invalid credentials"});
     }
 
     const user = result.rows[0];
-    const valid = await comparePassword(password, user.password_hash);
 
+    const valid = await comparePassword(password, user.password_hash);
+    
 
     if (!valid) {
         return res.status(401).json({error: "Invalid credentials"});
