@@ -64,3 +64,7 @@ export const login = async (req, res) => {
 
     res.json({token});
 };
+
+export const getMe = (req, res) => {
+    res.status(200).json(req.user)
+}
