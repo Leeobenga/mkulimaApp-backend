@@ -65,15 +65,51 @@ export const login = async (req, res) => {
     res.json({token});
 };
 
-export const getMe = (req, res) => {
+export const getMe = async (req, res) => {
     try {
-        if (!req.user) {
+        const userId = req.user.id;
+
+        const {rows} = await pool.query(
+            `SELECT id, email, has_completed_setup FROM users
+            WHERE id = $1`,
+            [userId]
+        );
+
+        if (rows.length === 0) {
             return res.status(404).json({ message: "User not found" });
         }
 
-        res.status(200).json(req.user);
+        const user = rows[0];
+
+        return res.status(200).json(user);
     } catch (error) {
         console.error("Error in getMe:", error);
-        res.status(500).json({ message: "Server error retrieving user" });
-    };
+        return res.status(500).json({ message: "Server error retrieving user" });
+    }
+};
+
+
+export const completeOnboarding = async (req, res) => {
+    const userId = req.user.id;
+    const { county, farmSize, irrigationType } = req.body;
+
+    await pool.query(
+        `INSERT INTO farmer_profiles (user_id, county, farm_size, irrigation_type)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id)
+        DO UPDATE SET
+            county = EXCLUDED.county,
+            farm_size = EXCLUDED.farm_size,
+            irrigation_type = EXCLUDED.irrigation_type`,
+        [userId, county, farmSize, irrigationType]
+    );
+
+    await pool.query(
+        `UPDATE users
+        SET has_completed_setup = TRUE
+        WHERE id = $1`,
+        [userId]
+    );
+
+    return res.json({ success: true });
 }
