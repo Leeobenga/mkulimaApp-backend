@@ -111,17 +111,47 @@ export const completeOnboarding = async (req, res) => {
     if(!farmingType)
         return res.status(400).json({ error: "Farming type required" });
 
-    if (!farmSize || farmSize <= 0) 
+    if (!farmSize || Number(farmSize) <= 0) 
         return res.status(400).json({ error: "Invalid farm size" });
 
     if (!waterSource)
         return res.status(400).json({ error: "water source required" })
 
+
+    //logical consistence checks
+    if (farmingType === "crop" && livestock.length > 0) {
+        return res.status(400).json({ 
+            error: "Livestock cannot be provided for crop-only farmers"
+        });
+    }
+
+    if (farmingType === "livestock" && crops.length > 0) {
+        return res.status(400).json({
+            error: "Crops cannot be provided for livestock-only farmers",
+        });
+    }
+
+    if (farmingType !== "crop" && livestock.length === 0 && farmingType === "mixed") {
+        return res.status(400).json({
+            error: " Mixed farming must include livestock"
+        })
+    }
+
     try{
         await pool.query(
             `
-            INSERT INTO farmer_profiles (user_id, county, subcounty, farming_type, livestock, crops, farm_size, water_source)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            INSERT INTO farmer_profiles (
+            user_id,
+            county, 
+            subcounty, 
+            farming_type, 
+            livestock, 
+            crops, 
+            farm_size, 
+            water_source,
+            updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
 
             ON CONFLICT (user_id)
             DO UPDATE SET
@@ -131,7 +161,8 @@ export const completeOnboarding = async (req, res) => {
                 livestock = EXCLUDED.livestock,
                 crops = EXCLUDED.crops,                
                 farm_size = EXCLUDED.farm_size,
-                water_source = EXCLUDED.water_source
+                water_source = EXCLUDED.water_source,
+                updated_at = NOW()
             `,
             [userId, county, subcounty, farmingType, livestock, crops, farmSize, waterSource]
         );
@@ -143,8 +174,12 @@ export const completeOnboarding = async (req, res) => {
             [userId]
         );
 
-        return res.json({ success: true });
+        return res.json({ 
+            success: true, 
+            message: "Onboarding completed successfully" 
+        });
     } catch (error) {
+        console.error("Onboarding error:", error)
         res.status(500).json({ error: "Onboarding failed" });
     }
     
