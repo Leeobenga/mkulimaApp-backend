@@ -91,25 +91,61 @@ export const getMe = async (req, res) => {
 
 export const completeOnboarding = async (req, res) => {
     const userId = req.user.id;
-    const { county, farmSize, irrigationType } = req.body;
 
-    await pool.query(
-        `INSERT INTO farmer_profiles (user_id, county, farm_size, irrigation_type)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (user_id)
-        DO UPDATE SET
-            county = EXCLUDED.county,
-            farm_size = EXCLUDED.farm_size,
-            irrigation_type = EXCLUDED.irrigation_type`,
-        [userId, county, farmSize, irrigationType]
-    );
+    const { county, 
+        subcounty, 
+        farmSize, 
+        waterSource, 
+        crops = [], 
+        livestock = [], 
+        farmingType 
+    } = req.body;
 
-    await pool.query(
-        `UPDATE users
-        SET has_completed_setup = TRUE
-        WHERE id = $1`,
-        [userId]
-    );
 
-    return res.json({ success: true });
-}
+    if(!county || subcounty) 
+        return res.status(400).json({ error: "Location required" });
+
+    if (!["crop", "livestock", "mixed"].includes(farmingType))
+        return res.status(400).json({ error: "Invalid farming type" });
+    
+    if(!farmingType)
+        return res.status(400).json({ error: "Farming type required" });
+
+    if (!farmSize || farmSize <= 0) 
+        return res.status(400).json({ error: "Invalid farm size" });
+
+    if (!waterSource)
+        return res.status(400).json({ error: "water source required" })
+
+    try{
+        await pool.query(
+            `
+            INSERT INTO farmer_profiles (user_id, county, subcounty, farming_type, livestock, crops, farm_size, water_source)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+
+            ON CONFLICT (user_id)
+            DO UPDATE SET
+                county = EXCLUDED.county,
+                subcounty = EXCLUDED.subcounty, 
+                farming_type = EXCLUDED.farming_type,              
+                livestock = EXCLUDED.livestock,
+                crops = EXCLUDED.crops,                
+                farm_size = EXCLUDED.farm_size,
+                water_source = EXCLUDED.water_source
+            `,
+            [userId, county, subcounty, farmingType, livestock, crops, farmSize, waterSource]
+        );
+
+        await pool.query(
+            `UPDATE users
+            SET has_completed_setup = TRUE
+            WHERE id = $1`,
+            [userId]
+        );
+
+        return res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: "Onboarding failed" });
+    }
+    
+};
