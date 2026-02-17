@@ -92,7 +92,8 @@ export const getMe = async (req, res) => {
 export const completeOnboarding = async (req, res) => {
     const userId = req.user.id;
 
-    const { county, 
+    const { 
+        county, 
         subcounty, 
         farmSize, 
         waterSource, 
