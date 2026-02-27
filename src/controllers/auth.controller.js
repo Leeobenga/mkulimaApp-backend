@@ -98,19 +98,17 @@ export const completeOnboarding = async (req, res) => {
         waterAccess
     } = req.body;
 
-    if (!location || !farming || !waterAcess)
+    if (!location || !farming || !waterAccess)
         return res.status(400).json({ error: "Incomplete onboarding data" });
 
     const { county, subcounty } = location;
 
     const { farmSize, crops = [], livestock= [], farmingType } = farming;
 
-    const {
-        source: waterSource,
-        availability: waterAvailability,
-        distance: waterDistance,
-        irrigating: currentlyIrrigating,
-    } = waterAccess;
+    const waterSource = waterAccess.source.toLowerCase().trim();
+    const waterAvailability = waterAccess.toLowerCase().trim();
+    const waterDistance = waterAccess.toLowerCase().trim();
+    const currentlyIrrigating = waterAccess.toLowerCase().trim();
 
     const allowedSources = ['borehole', 'well', 'river', 'dam', 'rain', 'municipal', 'lake', 'other'];
     const allowedAvailability = ['year_round', 'seasonal', 'unknown'];
