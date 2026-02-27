@@ -93,17 +93,30 @@ export const completeOnboarding = async (req, res) => {
     const userId = req.user.id;
 
     const { 
-        county, 
-        subcounty, 
-        farmSize, 
-        waterSource, 
-        crops = [], 
-        livestock = [], 
-        farmingType 
+        location,
+        farming,
+        waterAccess
     } = req.body;
 
+    if (!location || !farming || !waterAcess)
+        return res.status(400).json({ error: "Incomplete onboarding data" });
 
-    if(!county || subcounty) 
+    const { county, subcounty } = location;
+
+    const { farmSize, crops = [], livestock= [], farmingType } = farming;
+
+    const {
+        source: waterSource,
+        availability: waterAvailability,
+        distance: waterDistance,
+        irrigating: currentlyIrrigating,
+    } = waterAccess;
+
+    const allowedSources = ['borehole', 'well', 'river', 'dam', 'rain', 'municipal', 'lake', 'other'];
+    const allowedAvailability = ['year_round', 'seasonal', 'unknown'];
+    const allowedDistance = ['on_farm', 'near', 'medium', 'far']
+
+    if(!county || !subcounty) 
         return res.status(400).json({ error: "Location required" });
 
     if (!["crop", "livestock", "mixed"].includes(farmingType))
@@ -115,10 +128,30 @@ export const completeOnboarding = async (req, res) => {
     if (!farmSize || Number(farmSize) <= 0) 
         return res.status(400).json({ error: "Invalid farm size" });
 
-    if (!waterSource)
-        return res.status(400).json({ error: "water source required" })
 
+        //water access checks
 
+    if (!allowedSources.includes(waterSource))
+        return res.status(400).json({
+            error: "Invalid water source"
+        });
+    
+    if (!allowedAvailability.includes(waterAvailability))
+        return res.status(400).json({
+            error: "Invalid water availability"
+        });
+    
+    if (!allowedDistance.includes(waterDistance))
+        return res.status(400).json({
+            error: "Invalid water distance"
+        });
+
+    if (typeof currentlyIrrigating !== "boolean")
+        return res.status(400).json({
+            error: "Invalid irrigation flag"
+        });
+
+    
     //logical consistence checks
     if (farmingType === "crop" && livestock.length > 0) {
         return res.status(400).json({ 
@@ -138,6 +171,7 @@ export const completeOnboarding = async (req, res) => {
         })
     }
 
+
     try{
         await pool.query(
             `
@@ -150,9 +184,12 @@ export const completeOnboarding = async (req, res) => {
             crops, 
             farm_size, 
             water_source,
+            water_availability,
+            water_distance,
+            currently_irrigating,
             updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
 
             ON CONFLICT (user_id)
             DO UPDATE SET
@@ -163,9 +200,24 @@ export const completeOnboarding = async (req, res) => {
                 crops = EXCLUDED.crops,                
                 farm_size = EXCLUDED.farm_size,
                 water_source = EXCLUDED.water_source,
+                water_availability = EXCLUDED.water_availability,
+                water_distance = EXCLUDED.water_distance,
+                currently_irrigating = EXCLUDED.currently_irrigating,
                 updated_at = NOW()
             `,
-            [userId, county, subcounty, farmingType, livestock, crops, farmSize, waterSource]
+            [
+                userId,
+                county,
+                subcounty, 
+                farmingType, 
+                livestock, 
+                crops, 
+                farmSize, 
+                waterSource, 
+                waterAvailability, 
+                waterDistance, 
+                currentlyIrrigating
+            ]
         );
 
         await pool.query(
