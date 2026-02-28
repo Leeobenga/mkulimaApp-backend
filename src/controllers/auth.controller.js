@@ -106,9 +106,10 @@ export const completeOnboarding = async (req, res) => {
     const { farmSize, crops = [], livestock= [], farmingType } = farming;
 
     const waterSource = waterAccess.source.toLowerCase().trim();
-    const waterAvailability = waterAccess.toLowerCase().trim();
-    const waterDistance = waterAccess.toLowerCase().trim();
-    const currentlyIrrigating = waterAccess.toLowerCase().trim();
+    const waterAvailability = waterAccess.availability.toLowerCase().trim();
+    const waterDistance = waterAccess.distance.toLowerCase().trim();
+    const currentlyIrrigating = waterAccess.irrigating.toLowerCase().trim();
+    const interestedInIrrigation = waterAccess.interestedInIrrigation.toLowerCase().trim();
 
     const allowedSources = ['borehole', 'well', 'river', 'dam', 'rain', 'municipal', 'lake', 'other'];
     const allowedAvailability = ['year_round', 'seasonal', 'unknown'];
@@ -149,6 +150,11 @@ export const completeOnboarding = async (req, res) => {
             error: "Invalid irrigation flag"
         });
 
+    if (currentlyIrrigating === false && typeof interestedInIrrigation !== 'boolean')
+        return res.status(400).json({
+            error: "Must indicate interest in irrigation" 
+        });
+
     
     //logical consistence checks
     if (farmingType === "crop" && livestock.length > 0) {
@@ -185,9 +191,10 @@ export const completeOnboarding = async (req, res) => {
             water_availability,
             water_distance,
             currently_irrigating,
+            interested_in_irrigation,
             updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 NOW())
 
             ON CONFLICT (user_id)
             DO UPDATE SET
@@ -201,6 +208,7 @@ export const completeOnboarding = async (req, res) => {
                 water_availability = EXCLUDED.water_availability,
                 water_distance = EXCLUDED.water_distance,
                 currently_irrigating = EXCLUDED.currently_irrigating,
+                interested_in_irrigation = EXCLUDED.interested_in_irrigation,
                 updated_at = NOW()
             `,
             [
@@ -214,7 +222,8 @@ export const completeOnboarding = async (req, res) => {
                 waterSource, 
                 waterAvailability, 
                 waterDistance, 
-                currentlyIrrigating
+                currentlyIrrigating,
+                interestedInIrrigation,
             ]
         );
 
