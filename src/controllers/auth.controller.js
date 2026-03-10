@@ -37,32 +37,39 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
     const { email, password } = req.body;
 
-    const result = await pool.query(
-        "SELECT * FROM users WHERE email = $1",
-        [email]
-    );
-   
-    if (result.rowCount === 0) {
-        return res.status(401).json({error: "Invalid credentials"});
+    try {
+        if (typeof email !== "string" || typeof password !== "string" || !email.trim() || !password.trim()) {
+            return res.status(400).json({ error: "Missing credentials" });
+        }
+
+        const result = await pool.query(
+            "SELECT * FROM users WHERE email = $1",
+            [email]
+        );
+       
+        if (result.rowCount === 0) {
+            return res.status(401).json({error: "Invalid credentials"});
+        }
+
+        const user = result.rows[0];
+
+        const valid = await comparePassword(password, user.password_hash);
+        
+        if (!valid) {
+            return res.status(401).json({error: "Invalid credentials"});
+        }
+
+        const token = jwt.sign(
+            {id: user.id, role: user.role},
+            process.env.JWT_SECRET,
+            {expiresIn: "1h"}
+        );
+
+        return res.json({token});
+    } catch (error) {
+        console.error("Login error:", error);
+        return res.status(500).json({ error: "Server error during login" });
     }
-
-    const user = result.rows[0];
-
-    const valid = await comparePassword(password, user.password_hash);
-    
-
-    if (!valid) {
-        return res.status(401).json({error: "Invalid credentials"});
-    }
-
-
-    const token = jwt.sign(
-        {id: user.id, role: user.role},
-        process.env.JWT_SECRET,
-        {expiresIn: "1h"}
-    );
-
-    res.json({token});
 };
 
 export const getMe = async (req, res) => {
@@ -70,7 +77,7 @@ export const getMe = async (req, res) => {
         const userId = req.user.id;
 
         const {rows} = await pool.query(
-            `SELECT id, email, has_completed_setup FROM users
+            `SELECT id, email, username, has_completed_setup FROM users
             WHERE id = $1`,
             [userId]
         );
@@ -103,15 +110,16 @@ export const completeOnboarding = async (req, res) => {
 
     const { county, subcounty } = location;
 
-    const { farmSize, crops = [], livestock= [], farmingType } = farming;
+    const { farmSize, crops = [], livestock= [] } = farming;
 
+    const farmingType = farming.farmingType.toLowerCase().trim();
     const waterSource = waterAccess.source.toLowerCase().trim();
     const waterAvailability = waterAccess.availability.toLowerCase().trim();
     const waterDistance = waterAccess.distance.toLowerCase().trim();
-    const currentlyIrrigating = waterAccess.irrigating.toLowerCase().trim();
-    const interestedInIrrigation = waterAccess.interestedInIrrigation.toLowerCase().trim();
+    const currentlyIrrigating = waterAccess.irrigating;
+    const interestedInIrrigation = waterAccess.interestedInIrrigation;
 
-    const allowedSources = ['borehole', 'well', 'river', 'dam', 'rain', 'municipal', 'lake', 'other'];
+    const allowedSources = ['borehole', 'well', 'river', 'dam', 'rainfed', 'municipal', 'lake', 'other'];
     const allowedAvailability = ['year_round', 'seasonal', 'unknown'];
     const allowedDistance = ['on_farm', 'near', 'medium', 'far']
 
@@ -177,55 +185,84 @@ export const completeOnboarding = async (req, res) => {
 
 
     try{
-        await pool.query(
-            `
-            INSERT INTO farmer_profiles (
-            user_id,
-            county, 
-            subcounty, 
-            farming_type, 
-            livestock, 
-            crops, 
-            farm_size, 
-            water_source,
-            water_availability,
-            water_distance,
-            currently_irrigating,
-            interested_in_irrigation,
-            updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 NOW())
+        const farmerProfileQuery = `
+        INSERT INTO farmer_profiles (user_id, county, subcounty, farming_type, interested_in_irrigation, created_at)
+        VALUES ($1, $2, $3, $4, $5, NOW())
+        ON CONFLICT(user_id)
+        DO UPDATE SET
+            county = EXCLUDED.county,
+            subcounty = EXCLUDED.subcounty,
+            farming_type = EXCLUDED.farming_type,
+            interested_in_irrigation = EXCLUDED.interested_in_irrigation
+        RETURNING id, user_id, county, subcounty, farming_type, interested_in_irrigation;
+        `;
 
-            ON CONFLICT (user_id)
-            DO UPDATE SET
-                county = EXCLUDED.county,
-                subcounty = EXCLUDED.subcounty, 
-                farming_type = EXCLUDED.farming_type,              
-                livestock = EXCLUDED.livestock,
-                crops = EXCLUDED.crops,                
-                farm_size = EXCLUDED.farm_size,
-                water_source = EXCLUDED.water_source,
-                water_availability = EXCLUDED.water_availability,
-                water_distance = EXCLUDED.water_distance,
-                currently_irrigating = EXCLUDED.currently_irrigating,
-                interested_in_irrigation = EXCLUDED.interested_in_irrigation,
-                updated_at = NOW()
-            `,
-            [
-                userId,
-                county,
-                subcounty, 
-                farmingType, 
-                livestock, 
-                crops, 
-                farmSize, 
-                waterSource, 
-                waterAvailability, 
-                waterDistance, 
-                currentlyIrrigating,
-                interestedInIrrigation,
-            ]
-        );
+        const farmerProfileValues = [
+            userId,
+            county,
+            subcounty,
+            farmingType,
+            interestedInIrrigation            
+        ];
+
+        const farmerProfileResult = await pool.query(farmerProfileQuery, farmerProfileValues);
+
+        if (!farmerProfileResult.rows.length) {
+            throw new Error("Failed to insert or update farmer profile");
+        }
+
+        const farmerProfile = farmerProfileResult.rows[0];
+
+        const farmQuery = `
+        INSERT INTO farms (farmer_profile_id, county, subcounty, total_size, size_unit,
+                water_source, water_availability, water_distance, currently_irrigating, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+        ON CONFLICT (farmer_profile_id)
+        DO UPDATE SET
+            county = EXCLUDED.county,
+            subcounty = EXCLUDED.subcounty,
+            total_size = EXCLUDED.total_size,
+            size_unit = EXCLUDED.size_unit,
+            water_source = EXCLUDED.water_source,
+            water_availability = EXCLUDED.water_availability,
+            water_distance = EXCLUDED.water_distance,
+            currently_irrigating = EXCLUDED.currently_irrigating
+        RETURNING id, county, subcounty, total_size, size_unit, water_source,
+                water_availability, water_distance, currently_irrigating;
+        `;
+
+        const farmValues = [
+            farmerProfile.id,            
+            county,
+            subcounty,
+            farmSize,
+            "acres",
+            waterSource,
+            waterAvailability,
+            waterDistance,
+            currentlyIrrigating
+        ];
+
+        const farmResult = await pool.query(farmQuery, farmValues);
+
+        if (!farmResult.rows.length) {
+            throw new Error("Failed to insert farm details");
+        }
+
+        const farm = farmResult.rows[0];
+
+        if (crops.length > 0) {
+            const cropsInsertQuery = `
+            INSERT INTO crops (farm_id, crop_type, acreage, created_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (farmer_id, crop_type)
+            DO UPDATE SET acreage = EXCLUDE.acreage
+            `;
+            
+            for (const crop of crops) {
+                await pool.query(cropsInsertQuery, [farm.id, crop.name, crop.acreage]);
+            }
+        }
 
         await pool.query(
             `UPDATE users
@@ -234,9 +271,10 @@ export const completeOnboarding = async (req, res) => {
             [userId]
         );
 
-        return res.json({ 
-            success: true, 
-            message: "Onboarding completed successfully" 
+        return res.json({
+            successs: true,
+            farmerProfile,
+            farm
         });
     } catch (error) {
         console.error("Onboarding error:", error)
