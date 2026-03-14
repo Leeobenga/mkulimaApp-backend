@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 
 import authRoutes from "./routes/auth.routes.js";
+import userRoutes from "./routes/user.routes.js";
+import dashboardRoutes from "./routes/dashboard.routes.js";
 import healthRoutes from "./routes/healthRoutes.js";
 import requestLogger from "./middleware/requestLogger.js";
 
@@ -18,6 +20,8 @@ app.use(cors());
 
 //4. Routes
 app.use("/auth", authRoutes);
+app.use("/users", userRoutes);
+app.use("/dashboard", dashboardRoutes);
 app.use("/", healthRoutes);
 
 export default app;
