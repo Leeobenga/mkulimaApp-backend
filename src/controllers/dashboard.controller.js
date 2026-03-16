@@ -1,5 +1,11 @@
-export const getDashboard = async (userId) => {
+import pool from "../config/db.js";
+
+export const getDashboard = async (req, res) => {
     try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Not authorized" });
+        }
         const query = `
         SELECT
             fp.id AS farmer_profile_id,
@@ -42,7 +48,7 @@ export const getDashboard = async (userId) => {
             if(!farmsMap.has(row.farm_id)) {
                 farmsMap.set(row.farm_id, {
                     id: row.farm_id,
-                    name: row.farm_name,
+                    name: row.farm_name ?? "Unnamed Farm",
                     county: row.farm_county,
                     subcounty: row.farm_subcounty,
                     total_size: row.total_size,
@@ -66,19 +72,19 @@ export const getDashboard = async (userId) => {
             }
         }
 
-        return {
+        return res.json({
             success: true,
             farmer: {
                 id: result.rows[0]?.farmer_profile_id,
                 user_id: result.rows[0]?.user_id,
                 county: result.rows[0]?.farmer_county,
-                subcounty: result.rows[0].farmer_subcounty,
-                farmingType: result.rows[0].farming_type
+                subcounty: result.rows[0]?.farmer_subcounty,
+                farmingType: result.rows[0]?.farming_type
             },
             farms: Array.from(farmsMap.values())
-        };
+        });
     } catch(error) {
         console.error("Dashboard fetch error:", error);
-        return { success: false, message: error.message };
+        return res.status(500).json({ success: false, message: "Server error" });
     }
 }
