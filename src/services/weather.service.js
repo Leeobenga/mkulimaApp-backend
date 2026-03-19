@@ -39,8 +39,7 @@ const WEATHER_CODE_LABELS = {
     99: "Thunderstorm with heavy hail"
 };
 
-const buildLocationQuery = ({ county, subcounty }) =>
-    [subcounty, county, "Kenya"].filter(Boolean).join(", ");
+const buildLocationQuery = ({ county, subcounty }) => subcounty || county || null;
 
 const createAbortSignal = (timeoutMs) => {
     const controller = new AbortController();
@@ -69,20 +68,28 @@ const fetchJson = async (url) => {
 const getWeatherLabel = (code) => WEATHER_CODE_LABELS[code] || "Unknown";
 
 const geocodeLocation = async ({ county, subcounty }) => {
-    const locationQuery = buildLocationQuery({ county, subcounty });
-    if (!locationQuery) {
-        return null;
+    const locationQueries = [subcounty, county].filter(Boolean);
+
+    for (const locationQuery of locationQueries) {
+        const url = new URL(GEOCODING_BASE_URL);
+        url.searchParams.set("name", locationQuery);
+        url.searchParams.set("count", "1");
+        url.searchParams.set("language", "en");
+        url.searchParams.set("format", "json");
+        url.searchParams.set("countryCode", DEFAULT_COUNTRY_CODE);
+
+        const data = await fetchJson(url);
+        const match = data.results?.[0] || null;
+
+        if (match) {
+            return {
+                ...match,
+                matched_query: locationQuery
+            };
+        }
     }
 
-    const url = new URL(GEOCODING_BASE_URL);
-    url.searchParams.set("name", locationQuery);
-    url.searchParams.set("count", "1");
-    url.searchParams.set("language", "en");
-    url.searchParams.set("format", "json");
-    url.searchParams.set("countryCode", DEFAULT_COUNTRY_CODE);
-
-    const data = await fetchJson(url);
-    return data.results?.[0] || null;
+    return null;
 };
 
 const clampForecastDays = (days) => {
