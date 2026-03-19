@@ -87,4 +87,4 @@ export const getDashboard = async (req, res) => {
         console.error("Dashboard fetch error:", error);
         return res.status(500).json({ success: false, message: "Server error" });
     }
-}
+};
