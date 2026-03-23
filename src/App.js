@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 
 import authRoutes from "./routes/auth.routes.js";
+import cropRoutes from "./routes/cropRoutes.js";
 import userRoutes from "./routes/user.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import weatherRoutes from "./routes/weather.routes.js";
@@ -21,6 +22,7 @@ app.use(cors());
 
 //4. Routes
 app.use("/auth", authRoutes);
+app.use("/crops", cropRoutes);
 app.use("/users", userRoutes);
 app.use("/dashboard", dashboardRoutes);
 app.use("/weather", weatherRoutes);
