@@ -1,31 +1,10 @@
 import { getWaterAvailability } from "../waterEngine.js";
 
-const getGrowthStage = (plantingDate) => {
-    if (!plantingDate) {
-        return "Unknown";
-    }
-
-    const now = new Date();
-    const planted = new Date(plantingDate);
-
-    if (Number.isNaN(planted.getTime())) {
-        return "Unknown";
-    }
-
-    const days = Math.floor((now - planted) / (1000 * 60 * 60 * 24));
-
-    if (days <= 7) return "Germination";
-    if (days <= 35) return "Vegetative";
-    if (days <= 60) return "Reproductive";
-    return "Maturity";
-};
-
-
 const defaultCalibration = {
     weights: {
         temperature: 0.4,
         humidity: 0.3,
-        rainfall: 0.2
+        water: 0.3
     },
     stageMultipliers: {
         Germination: 1.3,
@@ -35,11 +14,11 @@ const defaultCalibration = {
         Unknown: 1.0
     },
     stageSensitivities: {
-        Germination: { temperature: 1.2, humidity: 1.0, rainfall: 1.4 },
-        Vegetative: { temperature: 1.0, humidity: 1.1, rainfall: 1.2 },
-        Reproductive: { temperature: 1.3, humidity: 1.2, rainfall: 1.1 },
-        Maturity: { temperature: 0.9, humidity: 1.0, rainfall: 0.8 },
-        Unknown: { temperature: 1.0, humidity: 1.0, rainfall: 1.0 }
+        Germination: { temperature: 1.2, humidity: 1.0 },
+        Vegetative: { temperature: 1.0, humidity: 1.1 },
+        Reproductive: { temperature: 1.3, humidity: 1.2 },
+        Maturity: { temperature: 0.9, humidity: 1.0 },
+        Unknown: { temperature: 1.0, humidity: 1.0 }
     }
 };
 
@@ -66,13 +45,14 @@ const getStageWeight = (stage, calibration) => {
 };
 
 export const getMaizeInsights = (weather, crop, calibration = {}, irrigation = null) => {
-    const stage = getGrowthStage(crop.plantingDate);
     const temp = weather?.temperature ?? null;
-    const rainfall = weather?.rainfall ?? null;
     const humidity = weather?.humidity ?? null;
 
     // Get water availability analysis
     const waterAnalysis = getWaterAvailability(weather, crop, irrigation, 'maize');
+
+    // Use growth stage from water analysis
+    const stage = waterAnalysis.growthStage;
 
     const mergedCalibration = {
         weights: { ...defaultCalibration.weights, ...(calibration.weights || {}) },
@@ -86,13 +66,14 @@ export const getMaizeInsights = (weather, crop, calibration = {}, irrigation = n
     const stageSens = mergedCalibration.stageSensitivities[stage] || mergedCalibration.stageSensitivities.Unknown;
     const tempRiskAdj = applyStageSensitivity(tempRisk, stageSens.temperature);
     const humidityRiskAdj = applyStageSensitivity(humidityRisk, stageSens.humidity);
-    const rainfallRiskAdj = applyStageSensitivity(waterAnalysis.adjustedRainfallRisk, stageSens.rainfall);
+    // Water risk adjustments are handled in the water engine
+    const waterRiskAdj = waterAnalysis.adjustedRainfallRisk;
 
     const stageWeight = getStageWeight(stage, mergedCalibration);
 
     const weights = mergedCalibration.weights;
 
-    const rawScore = tempRiskAdj * weights.temperature + humidityRiskAdj * weights.humidity + rainfallRiskAdj * weights.rainfall;
+    const rawScore = tempRiskAdj * weights.temperature + humidityRiskAdj * weights.humidity + waterRiskAdj * weights.water;
     const adjustedScore = Math.min(1, rawScore * stageWeight);
     const riskScore = Math.round(adjustedScore * 100);
 
@@ -103,19 +84,20 @@ export const getMaizeInsights = (weather, crop, calibration = {}, irrigation = n
         riskDetail: {
             temperature: Math.round(tempRisk * 100),
             humidity: Math.round(humidityRisk * 100),
-            rainfall: Math.round(waterAnalysis.rainfallRisk * 100),
+            water: Math.round(waterAnalysis.adjustedRainfallRisk * 100),
             temperatureAdjusted: Math.round(tempRiskAdj * 100),
             humidityAdjusted: Math.round(humidityRiskAdj * 100),
-            rainfallAdjusted: Math.round(rainfallRiskAdj * 100),
             stageWeight,
             stageSensitivity: stageSens,
             weights,
             rawScore: Math.round(rawScore * 100),
             adjustedScore: Math.round(adjustedScore * 100),
             waterAnalysis: {
+                growthStage: waterAnalysis.growthStage,
                 hasIrrigation: waterAnalysis.hasIrrigation,
                 irrigationMitigatesRisk: waterAnalysis.irrigationMitigatesRisk,
-                rainfallRiskReduction: Math.round((waterAnalysis.rainfallRisk - waterAnalysis.adjustedRainfallRisk) * 100)
+                rainfallRiskReduction: Math.round((waterAnalysis.rainfallRisk - waterAnalysis.adjustedRainfallRisk) * 100),
+                waterRequirements: waterAnalysis.waterRequirements
             }
         },
         risks: [],
