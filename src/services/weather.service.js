@@ -203,3 +203,45 @@ export const getWeatherForLocation = async ({ county, subcounty, days }) => {
         };
     }
 };
+
+const resolveWeatherPayload = (weatherData) => weatherData?.weather || weatherData || {};
+
+export const normalizeWeatherData = (weatherData) => {
+    const payload = resolveWeatherPayload(weatherData);
+    const current = payload.current || {};
+
+    return {
+        temperature: current.temperature_c ?? current.temperature_2m ?? null,
+        humidity: current.humidity_percent ?? current.relative_humidity_2m ?? null,
+        rainfall: extractRainfall(payload)
+    };
+};
+
+const sumRainfall = (values = []) =>
+    values.reduce((sum, value) => sum + (Number(value) || 0), 0);
+
+const extractRainfall = (data) => {
+    if (Array.isArray(data.forecast) && data.forecast.length > 0) {
+        return sumRainfall(
+            data.forecast.slice(0, 3).map((day) => day?.precipitation_sum_mm)
+        );
+    }
+
+    if (Array.isArray(data.daily?.precipitation_sum)) {
+        return sumRainfall(data.daily.precipitation_sum.slice(0, 3));
+    }
+
+    if (data.current?.precipitation_mm != null) {
+        return Number(data.current.precipitation_mm) || 0;
+    }
+
+    if (data.current?.rain_mm != null) {
+        return Number(data.current.rain_mm) || 0;
+    }
+
+    if (data.current?.showers_mm != null) {
+        return Number(data.current.showers_mm) || 0;
+    }
+
+    return 0;
+};
