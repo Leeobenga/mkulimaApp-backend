@@ -205,20 +205,136 @@ export const getWeatherForLocation = async ({ county, subcounty, days }) => {
 };
 
 const resolveWeatherPayload = (weatherData) => weatherData?.weather || weatherData || {};
+const FORECAST_WINDOW_DAYS = 3;
+
+const toNumericOrNull = (value) => {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+};
+
+const average = (values = []) => {
+    const numericValues = values
+        .map(toNumericOrNull)
+        .filter((value) => value !== null);
+
+    if (numericValues.length === 0) {
+        return null;
+    }
+
+    return numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length;
+};
+
+const maxValue = (values = []) => {
+    const numericValues = values
+        .map(toNumericOrNull)
+        .filter((value) => value !== null);
+
+    return numericValues.length > 0 ? Math.max(...numericValues) : null;
+};
+
+const minValue = (values = []) => {
+    const numericValues = values
+        .map(toNumericOrNull)
+        .filter((value) => value !== null);
+
+    return numericValues.length > 0 ? Math.min(...numericValues) : null;
+};
+
+const normalizeForecastEntries = (data) => {
+    if (Array.isArray(data.forecast)) {
+        return data.forecast;
+    }
+
+    if (data.daily?.time) {
+        return mapDailyForecast(data.daily);
+    }
+
+    return [];
+};
+
+const summarizeForecast = (forecast = []) => {
+    const window = forecast.slice(0, FORECAST_WINDOW_DAYS);
+    const maxTemps = window.map((day) => day?.temperature_max_c);
+    const minTemps = window.map((day) => day?.temperature_min_c);
+    const precipitation = window.map((day) => day?.precipitation_sum_mm);
+    const precipitationProbabilities = window.map((day) => day?.precipitation_probability_max_percent);
+    const windSpeeds = window.map((day) => day?.wind_speed_max_kph);
+
+    return {
+        windowDays: window.length,
+        rainfallTotal: sumRainfall(precipitation),
+        wetDays: window.filter((day) => {
+            const rainfallAmount = toNumericOrNull(day?.precipitation_sum_mm) ?? 0;
+            const precipitationProbability = toNumericOrNull(day?.precipitation_probability_max_percent) ?? 0;
+            return rainfallAmount >= 2 || precipitationProbability >= 60;
+        }).length,
+        avgMaxTemp: average(maxTemps),
+        avgMinTemp: average(minTemps),
+        hottestDay: maxValue(maxTemps),
+        coolestNight: minValue(minTemps),
+        hotDays: window.filter((day) => (toNumericOrNull(day?.temperature_max_c) ?? -Infinity) >= 32).length,
+        extremeHotDays: window.filter((day) => (toNumericOrNull(day?.temperature_max_c) ?? -Infinity) >= 35).length,
+        meanPrecipitationProbability: average(precipitationProbabilities),
+        avgWindSpeed: average(windSpeeds)
+    };
+};
+
+const buildRainfallSchema = ({
+    observedRainfall,
+    forecastRainfall,
+    fallbackRainfall
+}) => ({
+    observedMm: observedRainfall,
+    forecastWindowMm: forecastRainfall,
+    analysisWindowMm: forecastRainfall ?? fallbackRainfall ?? observedRainfall
+});
 
 export const normalizeWeatherData = (weatherData) => {
     const payload = resolveWeatherPayload(weatherData);
     const current = payload.current || {};
+    const forecast = normalizeForecastEntries(payload);
+    const forecastSummary = summarizeForecast(forecast);
+    const observedRainfall = extractObservedRainfall(payload);
+    const forecastRainfall = forecastSummary.windowDays > 0
+        ? forecastSummary.rainfallTotal
+        : null;
+    const rainfall = buildRainfallSchema({
+        observedRainfall,
+        forecastRainfall,
+        fallbackRainfall: extractRainfall(payload)
+    });
 
     return {
         temperature: current.temperature_c ?? current.temperature_2m ?? null,
         humidity: current.humidity_percent ?? current.relative_humidity_2m ?? null,
-        rainfall: extractRainfall(payload)
+        observedRainfall: rainfall.observedMm,
+        forecastRainfall: rainfall.forecastWindowMm,
+        rainfall,
+        windSpeed: current.wind_speed_kph ?? current.wind_speed_10m ?? null,
+        condition: current.condition ?? (current.weather_code != null ? getWeatherLabel(current.weather_code) : null),
+        forecast,
+        forecastSummary
     };
 };
 
 const sumRainfall = (values = []) =>
     values.reduce((sum, value) => sum + (Number(value) || 0), 0);
+
+const extractObservedRainfall = (data) => {
+    if (data.current?.precipitation_mm != null) {
+        return Number(data.current.precipitation_mm) || 0;
+    }
+
+    if (data.current?.rain_mm != null) {
+        return Number(data.current.rain_mm) || 0;
+    }
+
+    if (data.current?.showers_mm != null) {
+        return Number(data.current.showers_mm) || 0;
+    }
+
+    return null;
+};
 
 const extractRainfall = (data) => {
     if (Array.isArray(data.forecast) && data.forecast.length > 0) {
@@ -231,16 +347,9 @@ const extractRainfall = (data) => {
         return sumRainfall(data.daily.precipitation_sum.slice(0, 3));
     }
 
-    if (data.current?.precipitation_mm != null) {
-        return Number(data.current.precipitation_mm) || 0;
-    }
-
-    if (data.current?.rain_mm != null) {
-        return Number(data.current.rain_mm) || 0;
-    }
-
-    if (data.current?.showers_mm != null) {
-        return Number(data.current.showers_mm) || 0;
+    const observedRainfall = extractObservedRainfall(data);
+    if (observedRainfall !== null) {
+        return observedRainfall;
     }
 
     return 0;

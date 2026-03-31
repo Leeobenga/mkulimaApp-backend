@@ -1,4 +1,5 @@
 export const GROWTH_STAGES = ["Germination", "Vegetative", "Reproductive", "Maturity", "Unknown"];
+const STAGE_BOUNDARIES = [7, 35, 60];
 
 const STAGE_ALIASES = new Map([
     ["germination", "Germination"],
@@ -36,7 +37,8 @@ export const deriveGrowthStageFromPlantingDate = (plantingDate, now = new Date()
         return {
             stage: "Unknown",
             plantingDateValid: false,
-            daysSincePlanting: null
+            daysSincePlanting: null,
+            stageConfidence: 0
         };
     }
 
@@ -46,17 +48,28 @@ export const deriveGrowthStageFromPlantingDate = (plantingDate, now = new Date()
         return {
             stage: "Unknown",
             plantingDateValid: false,
-            daysSincePlanting: null
+            daysSincePlanting: null,
+            stageConfidence: 0
         };
     }
 
     const elapsedDays = Math.max(0, Math.floor((now - planted) / (1000 * 60 * 60 * 24)));
+    const nearestBoundaryDistance = STAGE_BOUNDARIES.reduce(
+        (closestDistance, boundary) => Math.min(closestDistance, Math.abs(elapsedDays - boundary)),
+        Number.POSITIVE_INFINITY
+    );
+    const stageConfidence = nearestBoundaryDistance >= 10
+        ? 0.9
+        : nearestBoundaryDistance >= 5
+            ? 0.7
+            : 0.45 + (nearestBoundaryDistance / 5) * 0.25;
 
     if (elapsedDays <= 7) {
         return {
             stage: "Germination",
             plantingDateValid: true,
-            daysSincePlanting: elapsedDays
+            daysSincePlanting: elapsedDays,
+            stageConfidence
         };
     }
 
@@ -64,7 +77,8 @@ export const deriveGrowthStageFromPlantingDate = (plantingDate, now = new Date()
         return {
             stage: "Vegetative",
             plantingDateValid: true,
-            daysSincePlanting: elapsedDays
+            daysSincePlanting: elapsedDays,
+            stageConfidence
         };
     }
 
@@ -72,14 +86,16 @@ export const deriveGrowthStageFromPlantingDate = (plantingDate, now = new Date()
         return {
             stage: "Reproductive",
             plantingDateValid: true,
-            daysSincePlanting: elapsedDays
+            daysSincePlanting: elapsedDays,
+            stageConfidence
         };
     }
 
     return {
         stage: "Maturity",
         plantingDateValid: true,
-        daysSincePlanting: elapsedDays
+        daysSincePlanting: elapsedDays,
+        stageConfidence
     };
 };
 
@@ -96,7 +112,8 @@ export const resolveGrowthStage = (crop = {}, now = new Date()) => {
             source: "explicit",
             plantingDate,
             plantingDateValid: derivedStage.plantingDateValid,
-            daysSincePlanting: derivedStage.daysSincePlanting
+            daysSincePlanting: derivedStage.daysSincePlanting,
+            stageConfidence: 1
         };
     }
 
@@ -106,7 +123,8 @@ export const resolveGrowthStage = (crop = {}, now = new Date()) => {
             source: "derived",
             plantingDate,
             plantingDateValid: derivedStage.plantingDateValid,
-            daysSincePlanting: derivedStage.daysSincePlanting
+            daysSincePlanting: derivedStage.daysSincePlanting,
+            stageConfidence: derivedStage.stageConfidence ?? 0.6
         };
     }
 
@@ -115,6 +133,7 @@ export const resolveGrowthStage = (crop = {}, now = new Date()) => {
         source: "unknown",
         plantingDate,
         plantingDateValid: derivedStage.plantingDateValid,
-        daysSincePlanting: derivedStage.daysSincePlanting
+        daysSincePlanting: derivedStage.daysSincePlanting,
+        stageConfidence: 0
     };
 };

@@ -5,7 +5,11 @@ import { getWeatherForLocation } from "../services/weather.service.js";
 export const getCropIntelligence = async (req, res) => {
     try {
         const userId = req.user?.id;
-        const { crops = [] } = req.body;
+        const {
+            crops = [],
+            irrigation = null,
+            calibration = null
+        } = req.body;
         const requestedDays = req.query?.days;
 
         if (!userId) {
@@ -50,7 +54,12 @@ export const getCropIntelligence = async (req, res) => {
             });
         }
 
-        const insights = await generateCropInsights({ weatherData, crops });
+        const insights = await generateCropInsights({
+            weatherData,
+            crops,
+            irrigation,
+            calibration
+        });
 
         res.json({
             success: true,

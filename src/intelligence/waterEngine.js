@@ -1,28 +1,23 @@
+import { resolveGrowthStage } from "./cropStage.js";
+import { createActionCollector } from "./shared/actions.js";
+import { normalizeEngineWeather } from "./shared/weatherSchema.js";
+
+const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+
+const interpolate = (value, inputMin, inputMax, outputMin, outputMax) => {
+    if (inputMax === inputMin) {
+        return outputMax;
+    }
+
+    const ratio = clamp((value - inputMin) / (inputMax - inputMin));
+    return outputMin + ratio * (outputMax - outputMin);
+};
+
 const toRainfallRisk = (rainfall) => {
     if (rainfall < 5) return 0.9; // severe water stress
     if (rainfall < 15) return 0.5; // moderate water stress
     if (rainfall <= 30) return 0.2; // acceptable
     return 0.1; // abundant water, low water stress
-};
-
-const getGrowthStage = (plantingDate) => {
-    if (!plantingDate) {
-        return "Unknown";
-    }
-
-    const now = new Date();
-    const planted = new Date(plantingDate);
-
-    if (Number.isNaN(planted.getTime())) {
-        return "Unknown";
-    }
-
-    const days = Math.floor((now - planted) / (1000 * 60 * 60 * 24));
-
-    if (days <= 7) return "Germination";
-    if (days <= 35) return "Vegetative";
-    if (days <= 60) return "Reproductive";
-    return "Maturity";
 };
 
 const getCropWaterRequirements = (cropType) => {
@@ -36,26 +31,36 @@ const getCropWaterRequirements = (cropType) => {
     return requirements[cropType] || requirements.unknown;
 };
 
-export const getWaterAvailability = (weather, crop, irrigation, cropType = 'unknown') => {
-    const rainfall = weather?.rainfall ?? null;
-    const temp = weather?.temperature ?? null;
-
-    // Get crop-specific information
-    const growthStage = getGrowthStage(crop?.plantingDate);
-    const waterRequirements = getCropWaterRequirements(cropType);
-
-    const rainfallRisk = rainfall === null ? 0 : toRainfallRisk(rainfall);
-    const hasIrrigation = irrigation && irrigation.available === true;
-
-    // Adjust rainfall risk based on irrigation availability
-    let adjustedRainfallRisk = rainfallRisk;
-    if (hasIrrigation && rainfallRisk > 0.3) {
-        // Reduce rainfall risk by up to 50% if irrigation is available
-        const irrigationMitigation = Math.min(0.5, rainfallRisk * 0.6);
-        adjustedRainfallRisk = Math.max(0, rainfallRisk - irrigationMitigation);
+const toIrrigationSupportFactor = (irrigation = {}) => {
+    if (irrigation?.available !== true) {
+        return 0;
     }
 
-    // Increase risk during critical growth stages
+    return interpolate(irrigation.qualityCoverage ?? 0, 0, 1, 0.7, 1);
+};
+
+export const getWaterAvailability = (weatherInput, crop, irrigation, cropType = 'unknown') => {
+    const weather = normalizeEngineWeather(weatherInput);
+    const rainfall = weather?.rainfall?.analysisWindowMm ?? null;
+
+    const stageContext = resolveGrowthStage(crop);
+    const growthStage = stageContext.stage;
+    const waterRequirements = getCropWaterRequirements(cropType);
+    const irrigationContext = irrigation && typeof irrigation === "object" ? irrigation : {};
+    const hasIrrigation = irrigationContext.available === true;
+    const irrigationSupportFactor = toIrrigationSupportFactor(irrigationContext);
+    const rainfallRisk = rainfall === null ? 0 : toRainfallRisk(rainfall);
+    const actionCollector = createActionCollector();
+    const cropName = cropType.charAt(0).toUpperCase() + cropType.slice(1);
+    const stageMessage = growthStage !== "Unknown" ? ` during ${growthStage} stage` : "";
+
+    let adjustedRainfallRisk = rainfallRisk;
+    let irrigationRiskReduction = 0;
+    if (hasIrrigation && rainfallRisk > 0.3) {
+        irrigationRiskReduction = Math.min(0.5, rainfallRisk * 0.6 * irrigationSupportFactor);
+        adjustedRainfallRisk = Math.max(0, rainfallRisk - irrigationRiskReduction);
+    }
+
     if (waterRequirements.criticalStages.includes(growthStage)) {
         adjustedRainfallRisk = Math.min(1, adjustedRainfallRisk * 1.3);
     }
@@ -64,46 +69,110 @@ export const getWaterAvailability = (weather, crop, irrigation, cropType = 'unkn
         rainfallRisk,
         adjustedRainfallRisk,
         hasIrrigation,
-        irrigationMitigatesRisk: hasIrrigation && rainfallRisk > 0.3,
+        irrigationMitigatesRisk: irrigationRiskReduction > 0,
+        irrigationRiskReduction,
+        irrigationSupportFactor,
+        irrigationContext,
         growthStage,
+        growthStageSource: stageContext.source,
         cropType,
         waterRequirements,
-        recommendations: []
+        forecastSummary: weather?.forecastSummary || {}
     };
 
-    // Water availability risk assessment
     if (rainfall !== null && rainfallRisk > 0.5) {
         waterAnalysis.risk = "Water availability risk";
 
-        // Crop-specific risk messaging
-        const cropName = cropType.charAt(0).toUpperCase() + cropType.slice(1);
-        const stageMessage = growthStage !== "Unknown" ? ` during ${growthStage} stage` : "";
-
         if (rainfall < 5) {
             if (hasIrrigation) {
-                waterAnalysis.recommendations.push(`Low rainfall detected for ${cropName}${stageMessage}. Activate irrigation system within 48 hours to maintain soil moisture.`);
+                actionCollector.add(
+                    `Low rainfall detected for ${cropName}${stageMessage}. Activate irrigation system within 48 hours to maintain soil moisture.`,
+                    {
+                        key: "water_low_rainfall_irrigate",
+                        why: "The rainfall window is too low for the crop stage, but irrigation is available to buffer stress.",
+                        priority: "immediate",
+                        category: "water",
+                        timing: "within 48 hours",
+                        score: 88
+                    }
+                );
             } else {
-                waterAnalysis.recommendations.push(`Severe water stress for ${cropName}${stageMessage}. Irrigation recommended within 48 hours - consider supplemental watering options.`);
+                actionCollector.add(
+                    `Severe water stress for ${cropName}${stageMessage}. Irrigation recommended within 48 hours - consider supplemental watering options.`,
+                    {
+                        key: "water_low_rainfall_no_irrigation",
+                        why: "The rainfall window is too low for the crop stage and no irrigation support is confirmed.",
+                        priority: "immediate",
+                        category: "water",
+                        timing: "within 48 hours",
+                        score: 90
+                    }
+                );
             }
         } else {
             if (hasIrrigation) {
-                waterAnalysis.recommendations.push(`Monitor soil moisture for ${cropName}${stageMessage} and use irrigation to supplement rainfall during critical growth stages.`);
+                actionCollector.add(
+                    `Monitor soil moisture for ${cropName}${stageMessage} and use irrigation to supplement rainfall during critical growth stages.`,
+                    {
+                        key: "water_monitor_with_irrigation",
+                        why: "Rainfall is below the safer water window, but irrigation can partially reduce stress.",
+                        priority: "soon",
+                        category: "water",
+                        timing: "within 72 hours",
+                        score: 68
+                    }
+                );
             } else {
-                waterAnalysis.recommendations.push(`Monitor soil moisture for ${cropName}${stageMessage} and ensure steady water supply during critical growth stages.`);
+                actionCollector.add(
+                    `Monitor soil moisture for ${cropName}${stageMessage} and ensure steady water supply during critical growth stages.`,
+                    {
+                        key: "water_monitor_without_irrigation",
+                        why: "Rainfall is below the safer water window and the crop may need supplemental water planning.",
+                        priority: "soon",
+                        category: "water",
+                        timing: "within 72 hours",
+                        score: 66
+                    }
+                );
             }
         }
 
-        // Critical stage warnings
         if (waterRequirements.criticalStages.includes(growthStage)) {
-            waterAnalysis.recommendations.push(`⚠️ CRITICAL: ${cropName} is in ${growthStage} stage where water stress can severely impact yield. Prioritize water management.`);
+            actionCollector.add(
+                `${cropName} is in ${growthStage} stage where water stress can severely impact yield. Prioritize water management.`,
+                {
+                    key: "water_stage_critical",
+                    why: "This growth stage is yield-sensitive, so even moderate water stress has a higher agronomic impact.",
+                    priority: "immediate",
+                    category: "stage_critical",
+                    timing: "today",
+                    score: 94
+                }
+            );
         }
     }
 
-    // Irrigation-specific recommendations
     if (hasIrrigation && adjustedRainfallRisk > 0.4) {
-        const cropName = cropType.charAt(0).toUpperCase() + cropType.slice(1);
-        waterAnalysis.recommendations.push(`Consider scheduling irrigation for ${cropName} to optimize water use efficiency and reduce overall risk.`);
+        actionCollector.add(
+            `Consider scheduling irrigation for ${cropName} to optimize water use efficiency and reduce overall risk.`,
+            {
+                key: "water_schedule_irrigation",
+                why: "Irrigation is available and current rainfall is still insufficient to fully cover crop water demand.",
+                priority: "soon",
+                category: "irrigation",
+                timing: "before the next dry spell",
+                score: 76
+            }
+        );
     }
 
-    return waterAnalysis;
+    const actionPlan = actionCollector.draft();
+    const recommendedActions = actionCollector.finalize();
+
+    return {
+        ...waterAnalysis,
+        actionPlan,
+        recommendedActions,
+        recommendations: recommendedActions.map((action) => action.message)
+    };
 };

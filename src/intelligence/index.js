@@ -1,4 +1,4 @@
-import { getMaizeInsights } from "./crops/maizeEngine.js";
+import { getMaizeInsights } from "./crops/maize/index.js";
 
 export const getCropInsights = (cropType, weather, cropData, calibration = {}, irrigation = null) => {
     const normalizedCropType = typeof cropType === "string"
