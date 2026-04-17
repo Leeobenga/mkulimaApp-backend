@@ -1,6 +1,34 @@
 import pool from "../config/db.js";
 import { generateCropInsights } from "../services/cropService.js";
+import {
+    getCropIntelligenceHistoryEntries,
+    persistCropIntelligenceHistory
+} from "../services/cropIntelligenceHistory.service.js";
 import { getWeatherForLocation } from "../services/weather.service.js";
+
+const mapHistoryEntry = (entry) => ({
+    id: entry.id,
+    runGroupId: entry.run_group_id,
+    userId: entry.user_id,
+    cropId: entry.crop_id,
+    farmId: entry.farm_id,
+    cropType: entry.crop_type,
+    stage: entry.stage,
+    stageSource: entry.stage_source,
+    county: entry.county,
+    subcounty: entry.subcounty,
+    riskScore: entry.risk_score,
+    confidenceScore: entry.confidence_score,
+    modelVersion: entry.model_version,
+    drivers: entry.drivers,
+    risks: entry.risks,
+    recommendations: entry.recommendations,
+    cropInput: entry.crop_input,
+    requestContext: entry.request_context,
+    weather: entry.weather_snapshot,
+    result: entry.result_snapshot,
+    createdAt: entry.created_at
+});
 
 export const getCropIntelligence = async (req, res) => {
     try {
@@ -61,15 +89,75 @@ export const getCropIntelligence = async (req, res) => {
             calibration
         });
 
+        let historyEntries = [];
+        let historySaved = false;
+
+        try {
+            historyEntries = await persistCropIntelligenceHistory({
+                userId,
+                profile,
+                weatherData,
+                crops,
+                insights,
+                requestedDays,
+                irrigation,
+                calibration
+            });
+            historySaved = historyEntries.length === insights.length;
+        } catch (historyError) {
+            console.error("Crop intelligence history save error:", historyError);
+        }
+
         res.json({
             success: true,
             county: profile.county,
             subcounty: profile.subcounty,
             weather: weatherData,
-            data: insights
+            data: insights,
+            historySaved,
+            historyCount: historyEntries.length,
+            historyRunGroupId: historyEntries[0]?.run_group_id ?? null
         });
     } catch (error) {
         console.error("Error generating crop insights:", error);
         res.status(500).json({ success: false, message: "Failed to generate crop insights" });
+    }
+};
+
+export const getCropIntelligenceHistory = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Not authorized" });
+        }
+
+        const {
+            entries,
+            filters
+        } = await getCropIntelligenceHistoryEntries({
+            userId,
+            limit: req.query?.limit,
+            cropType: req.query?.cropType ?? req.query?.crop_type
+        });
+
+        return res.json({
+            success: true,
+            count: entries.length,
+            filters,
+            history: entries.map(mapHistoryEntry)
+        });
+    } catch (error) {
+        if (error.code === "42P01") {
+            return res.status(503).json({
+                success: false,
+                message: "Crop intelligence history is not ready"
+            });
+        }
+
+        console.error("Error fetching crop intelligence history:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch crop intelligence history"
+        });
     }
 };

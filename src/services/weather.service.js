@@ -208,6 +208,10 @@ const resolveWeatherPayload = (weatherData) => weatherData?.weather || weatherDa
 const FORECAST_WINDOW_DAYS = 3;
 
 const toNumericOrNull = (value) => {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
+
     const numericValue = Number(value);
     return Number.isFinite(numericValue) ? numericValue : null;
 };
@@ -352,5 +356,5 @@ const extractRainfall = (data) => {
         return observedRainfall;
     }
 
-    return 0;
+    return null;
 };

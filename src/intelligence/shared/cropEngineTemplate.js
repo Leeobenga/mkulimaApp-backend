@@ -28,18 +28,19 @@ export const createCropEngine = ({
         ...context,
         ...analysis
     });
+    const riskScore = Math.round(analysis.adjustedScore * 100);
     const actionCollector = createActionCollector();
     const risks = buildActions(
         {
             ...context,
             ...analysis,
             confidence,
-            driverCandidates
+            driverCandidates,
+            riskScore
         },
         actionCollector
     );
     const recommendedActions = actionCollector.finalize();
-    const riskScore = Math.round(analysis.adjustedScore * 100);
 
     return {
         crop: cropName,
