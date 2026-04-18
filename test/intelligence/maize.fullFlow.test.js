@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import pool from "../../src/config/db.js";
 import {
+    getCurrentCropIntelligence,
     getCropIntelligence,
     getCropIntelligenceHistory
 } from "../../src/controllers/crop.controller.js";
@@ -152,6 +153,103 @@ test("getCropIntelligence runs a maize scenario from profile lookup to response 
     assert.ok(result.drivers.includes("Water stress"));
     assert.ok(hasRecommendation(result, "Activate irrigation system within 48 hours"));
     assert.ok(hasRecommendation(result, "Overall maize risk is high"));
+});
+
+test("getCurrentCropIntelligence uses the farmer's saved crops and farm water context automatically", async (t) => {
+    const scenario = maizeFlowScenarios.hotDryReproductiveWithIrrigation;
+    const fetchCalls = [];
+    const historyInserts = [];
+
+    t.mock.method(pool, "query", async (queryText, params) => {
+        if (/LEFT JOIN farms/i.test(queryText) && /LEFT JOIN crops/i.test(queryText)) {
+            assert.deepEqual(params, [42]);
+
+            return {
+                rowCount: 1,
+                rows: [
+                    {
+                        farmer_county: scenario.profile.county,
+                        farmer_subcounty: scenario.profile.subcounty,
+                        farm_id: "farm-1",
+                        water_source: "canal",
+                        water_availability: "reliable",
+                        water_distance: "near",
+                        currently_irrigating: true,
+                        crop_id: "crop-1",
+                        crop_type: "MAIZE",
+                        acreage: 2.5,
+                        planting_date: null,
+                        growth_stage: "reproductive"
+                    }
+                ]
+            };
+        }
+
+        if (/INSERT INTO crop_intelligence_history/i.test(queryText)) {
+            historyInserts.push(params);
+            return {
+                rowCount: 1,
+                rows: [
+                    {
+                        id: historyInserts.length,
+                        run_group_id: "run-group-current-1",
+                        crop_type: params[4],
+                        created_at: "2026-04-18T08:00:00.000Z"
+                    }
+                ]
+            };
+        }
+
+        throw new Error(`Unexpected query: ${queryText}`);
+    });
+
+    t.mock.method(global, "fetch", async (url) => {
+        const requestUrl = new URL(url);
+        fetchCalls.push(requestUrl);
+
+        if (requestUrl.hostname === "geocoding-api.open-meteo.com") {
+            return createJsonResponse(scenario.geocodingResponse);
+        }
+
+        if (requestUrl.hostname === "api.open-meteo.com") {
+            return createJsonResponse(scenario.forecastResponse);
+        }
+
+        throw new Error(`Unexpected fetch URL: ${requestUrl.toString()}`);
+    });
+
+    const response = createMockResponse();
+
+    await getCurrentCropIntelligence(
+        {
+            user: { id: 42 },
+            query: { days: "3" }
+        },
+        response.res
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(fetchCalls.length, 2);
+    assert.equal(response.body.success, true);
+    assert.equal(response.body.source, "saved_crops");
+    assert.equal(response.body.savedCropsCount, 1);
+    assert.equal(response.body.farmCount, 1);
+    assert.equal(response.body.historySaved, true);
+    assert.equal(response.body.historyRunGroupId, "run-group-current-1");
+    assert.equal(historyInserts.length, 1);
+    assert.equal(historyInserts[0][1], 42);
+    assert.equal(historyInserts[0][2], "crop-1");
+    assert.equal(historyInserts[0][3], "farm-1");
+
+    const [result] = response.body.data;
+
+    assert.equal(result.crop, "maize");
+    assert.equal(result.stage, "Reproductive");
+    assert.equal(result.stageSource, "explicit");
+    assert.equal(result.riskDetail.components.water.hasIrrigation, true);
+    assert.equal(result.riskDetail.components.water.irrigationMitigatesRisk, true);
+    assert.ok(result.drivers.includes("Water stress"));
+    assert.ok(hasRecommendation(result, "Activate irrigation system within 48 hours"));
 });
 
 test("getCropIntelligenceHistory returns persisted crop intelligence runs for the authenticated user", async (t) => {
