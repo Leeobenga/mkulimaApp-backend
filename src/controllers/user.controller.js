@@ -5,8 +5,16 @@ export const getMe = async (req, res) => {
         const userId = req.user.id;
 
         const {rows} = await pool.query(
-            `SELECT id, email, username, has_completed_setup FROM users
-            WHERE id = $1`,
+            `SELECT
+                u.id,
+                u.email,
+                u.username,
+                u.has_completed_setup,
+                fp.county,
+                fp.subcounty
+             FROM users u
+             LEFT JOIN farmer_profiles fp ON fp.user_id = u.id
+             WHERE u.id = $1`,
             [userId]
         );
 
@@ -16,7 +24,18 @@ export const getMe = async (req, res) => {
 
         const user = rows[0];
 
-        return res.status(200).json(user);
+        return res.status(200).json({
+            id: user.id,
+            email: user.email,
+            username: user.username,
+            has_completed_setup: user.has_completed_setup,
+            location: user.county || user.subcounty
+                ? {
+                    county: user.county,
+                    subcounty: user.subcounty
+                }
+                : null
+        });
     } catch (error) {
         console.error("Error in getMe:", error);
         return res.status(500).json({ message: "Server error retrieving user" });
