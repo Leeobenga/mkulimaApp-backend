@@ -5,6 +5,7 @@ import authRoutes from "./routes/auth.routes.js";
 import cropRoutes from "./routes/cropRoutes.js";
 import userRoutes from "./routes/user.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
+import farmRoutes from "./routes/farm.routes.js";
 import weatherRoutes from "./routes/weather.routes.js";
 import healthRoutes from "./routes/healthRoutes.js";
 import requestLogger from "./middleware/requestLogger.js";
@@ -25,6 +26,7 @@ app.use("/auth", authRoutes);
 app.use("/crops", cropRoutes);
 app.use("/users", userRoutes);
 app.use("/dashboard", dashboardRoutes);
+app.use("/farms", farmRoutes);
 app.use("/weather", weatherRoutes);
 app.use("/", healthRoutes);
 
