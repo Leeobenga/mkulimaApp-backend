@@ -172,3 +172,174 @@ export const logout = async (req, res) => {
         return res.status(500).json({ error: "Server error during logout" });
     }
 };
+
+// Helper to create a short verification token
+const createVerificationToken = () => {
+    return crypto.randomBytes(32).toString("hex");
+};
+
+const VERIFICATION_TTL = process.env.VERIFICATION_TTL || "1d";
+const getVerificationExpiry = () => new Date(Date.now() + parseDurationToMs(VERIFICATION_TTL));
+
+export const requestEmailVerification = async (req, res) => {
+    const { userId, email } = req.body;
+
+    if (!userId || typeof email !== "string" || !email.trim()) {
+        return res.status(400).json({ message: "Missing parameters" });
+    }
+
+    try {
+        const token = createVerificationToken();
+        const tokenHash = hashToken(token);
+        const expiresAt = getVerificationExpiry();
+
+        // remove any existing email tokens for this user
+        await pool.query("DELETE FROM verification_tokens WHERE user_id = $1 AND type = 'email'", [userId]);
+
+        await pool.query(
+            "INSERT INTO verification_tokens (user_id, token_hash, type, contact, expires_at) VALUES ($1, $2, 'email', $3, $4)",
+            [userId, tokenHash, email, expiresAt]
+        );
+
+        // TODO: send email with token to user via email service. For now, return the token for client-side handling in development.
+        return res.status(200).json({ success: true, token });
+    } catch (error) {
+        console.error("requestEmailVerification error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
+
+export const requestPhoneVerification = async (req, res) => {
+    const { userId, phone } = req.body;
+
+    if (!userId || typeof phone !== "string" || !phone.trim()) {
+        return res.status(400).json({ message: "Missing parameters" });
+    }
+
+    try {
+        const token = createVerificationToken();
+        const tokenHash = hashToken(token);
+        const expiresAt = getVerificationExpiry();
+
+        // remove any existing phone tokens for this user
+        await pool.query("DELETE FROM verification_tokens WHERE user_id = $1 AND type = 'phone'", [userId]);
+
+        await pool.query(
+            "INSERT INTO verification_tokens (user_id, token_hash, type, contact, expires_at) VALUES ($1, $2, 'phone', $3, $4)",
+            [userId, tokenHash, phone, expiresAt]
+        );
+
+        // TODO: send SMS to user with token via SMS provider. For now, return the token for client-side handling in development.
+        return res.status(200).json({ success: true, token });
+    } catch (error) {
+        console.error("requestPhoneVerification error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
+
+export const verifyEmail = async (req, res) => {
+    const { userId, token } = req.body;
+
+    if (!userId || typeof token !== "string") {
+        return res.status(400).json({ message: "Missing parameters" });
+    }
+
+    try {
+        const tokenHash = hashToken(token);
+        const q = await pool.query(
+            "SELECT id, user_id, type, expires_at FROM verification_tokens WHERE token_hash = $1 AND type = 'email'",
+            [tokenHash]
+        );
+
+        if (q.rowCount === 0) {
+            return res.status(400).json({ message: "Invalid or expired token" });
+        }
+
+        const row = q.rows[0];
+        if (row.user_id !== Number(userId) || new Date(row.expires_at) <= new Date()) {
+            return res.status(400).json({ message: "Invalid or expired token" });
+        }
+
+        await pool.query("UPDATE users SET email_verified = TRUE WHERE id = $1", [userId]);
+        await pool.query("DELETE FROM verification_tokens WHERE id = $1", [row.id]);
+
+        return res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("verifyEmail error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
+
+export const verifyPhone = async (req, res) => {
+    const { userId, token, phone } = req.body;
+
+    if (!userId || typeof token !== "string") {
+        return res.status(400).json({ message: "Missing parameters" });
+    }
+
+    try {
+        const tokenHash = hashToken(token);
+        const q = await pool.query(
+            "SELECT id, user_id, type, contact, expires_at FROM verification_tokens WHERE token_hash = $1 AND type = 'phone'",
+            [tokenHash]
+        );
+
+        if (q.rowCount === 0) {
+            return res.status(400).json({ message: "Invalid or expired token" });
+        }
+
+        const row = q.rows[0];
+        if (row.user_id !== Number(userId) || new Date(row.expires_at) <= new Date()) {
+            return res.status(400).json({ message: "Invalid or expired token" });
+        }
+
+        // Optionally verify phone matches the token record
+        if (phone && row.contact && phone !== row.contact) {
+            return res.status(400).json({ message: "Phone number mismatch" });
+        }
+
+        await pool.query("UPDATE users SET phone_verified = TRUE, phone = COALESCE($2, phone) WHERE id = $1", [userId, phone]);
+        await pool.query("DELETE FROM verification_tokens WHERE id = $1", [row.id]);
+
+        return res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("verifyPhone error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
+
+export const changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const user = req.user;
+
+    if (!user || !user.id) {
+        return res.status(401).json({ message: "Not authenticated" });
+    }
+
+    if (typeof currentPassword !== "string" || typeof newPassword !== "string" || !currentPassword.trim() || !newPassword.trim()) {
+        return res.status(400).json({ message: "Missing passwords" });
+    }
+
+    try {
+        const q = await pool.query("SELECT password_hash FROM users WHERE id = $1", [user.id]);
+        if (q.rowCount === 0) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        const valid = await comparePassword(currentPassword, q.rows[0].password_hash);
+        if (!valid) {
+            return res.status(401).json({ message: "Current password is incorrect" });
+        }
+
+        const newHash = await hashPassword(newPassword);
+        await pool.query("UPDATE users SET password_hash = $1 WHERE id = $2", [newHash, user.id]);
+
+        // Revoke all refresh tokens for the user to force re-login
+        await pool.query("UPDATE refresh_tokens SET revoked_at = NOW() WHERE user_id = $1", [user.id]);
+
+        return res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("changePassword error:", error);
+        return res.status(500).json({ message: "Server error" });
+    }
+};
