@@ -182,9 +182,10 @@ const VERIFICATION_TTL = process.env.VERIFICATION_TTL || "1d";
 const getVerificationExpiry = () => new Date(Date.now() + parseDurationToMs(VERIFICATION_TTL));
 
 export const requestEmailVerification = async (req, res) => {
-    const { userId, email } = req.body;
+    const userId = req.user.id;
+    const { email } = req.body;
 
-    if (!userId || typeof email !== "string" || !email.trim()) {
+    if (typeof email !== "string" || !email.trim()) {
         return res.status(400).json({ message: "Missing parameters" });
     }
 
@@ -210,9 +211,10 @@ export const requestEmailVerification = async (req, res) => {
 };
 
 export const requestPhoneVerification = async (req, res) => {
-    const { userId, phone } = req.body;
+    const userId = req.user.id;
+    const { phone } = req.body;
 
-    if (!userId || typeof phone !== "string" || !phone.trim()) {
+    if (typeof phone !== "string" || !phone.trim()) {
         return res.status(400).json({ message: "Missing parameters" });
     }
 
