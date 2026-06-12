@@ -11,8 +11,8 @@ router.post("/refresh", refresh);
 router.post("/logout", logout);
 
 // Verification endpoints
-router.post("/request-email-verification", requestEmailVerification);
-router.post("/request-phone-verification", requestPhoneVerification);
+router.post("/request-email-verification", protect, requestEmailVerification);
+router.post("/request-phone-verification", protect, requestPhoneVerification);
 router.post("/verify-email", verifyEmail);
 router.post("/verify-phone", verifyPhone);
 
