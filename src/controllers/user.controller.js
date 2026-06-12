@@ -9,6 +9,7 @@ export const getMe = async (req, res) => {
                 u.id,
                 u.email,
                 u.username,
+                u.phone,
                 u.has_completed_setup,
                 fp.county,
                 fp.subcounty
@@ -28,6 +29,7 @@ export const getMe = async (req, res) => {
             id: user.id,
             email: user.email,
             username: user.username,
+            phone: user.phone,
             has_completed_setup: user.has_completed_setup,
             location: user.county || user.subcounty
                 ? {
@@ -41,6 +43,80 @@ export const getMe = async (req, res) => {
         return res.status(500).json({ message: "Server error retrieving user" });
     }
 };
+
+export const updateMe = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const { username, phone, location } = req.body;
+
+        if (username !== undefined && (typeof username !== "string" || !username.trim())) {
+            return res.status(400).json({ error: "Invalid username" });
+        }
+
+        if (phone !== undefined && (typeof phone !== "string" || !phone.trim())) {
+            return res.status(400).json({ error: "Invalid phone number" });
+        }
+
+        if (location !== undefined) {
+            const { county, subcounty } = location;
+            if (!county || !subcounty) {
+                return res.status(400).json({ error: "Location requires both county and subcounty" });
+            }
+        }
+
+        if (username === undefined && phone === undefined && location === undefined) {
+            return res.status(400).json({ error: "No fields to update" });
+        }
+
+        let updatedUser = null;
+
+        if (username !== undefined || phone !== undefined) {
+            const fields = [];
+            const values = [];
+            let idx = 1;
+
+            if (username !== undefined) { fields.push(`username = $${idx++}`); values.push(username.trim()); }
+            if (phone !== undefined)    { fields.push(`phone = $${idx++}`);    values.push(phone.trim()); }
+
+            values.push(userId);
+            const { rows } = await pool.query(
+                `UPDATE users SET ${fields.join(", ")} WHERE id = $${idx} RETURNING id, email, username, phone, has_completed_setup`,
+                values
+            );
+
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "User not found" });
+            }
+
+            updatedUser = rows[0];
+        }
+
+        let updatedLocation = null;
+
+        if (location !== undefined) {
+            const { county, subcounty } = location;
+            const { rows } = await pool.query(
+                `UPDATE farmer_profiles
+                 SET county = $1, subcounty = $2
+                 WHERE user_id = $3
+                 RETURNING county, subcounty`,
+                [county, subcounty, userId]
+            );
+
+            if (rows.length === 0) {
+                return res.status(404).json({ error: "Farmer profile not found — complete onboarding first" });
+            }
+
+            updatedLocation = rows[0];
+        }
+
+        return res.json({ success: true, user: updatedUser, location: updatedLocation });
+    } catch (error) {
+        console.error("updateMe error:", error);
+        return res.status(500).json({ error: "Server error updating profile" });
+    }
+};
+
 
 export const completeOnboarding = async (req, res) => {
     const userId = req.user.id;
@@ -201,8 +277,8 @@ export const completeOnboarding = async (req, res) => {
             const cropsInsertQuery = `
             INSERT INTO crops (farm_id, crop_type, acreage, created_at)
             VALUES ($1, $2, $3, NOW())
-            ON CONFLICT (farmer_id, crop_type)
-            DO UPDATE SET acreage = EXCLUDE.acreage
+            ON CONFLICT (farm_id, crop_type)
+            DO UPDATE SET acreage = EXCLUDED.acreage
             `;
             
             for (const crop of crops) {
