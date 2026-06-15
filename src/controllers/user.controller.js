@@ -275,14 +275,17 @@ export const completeOnboarding = async (req, res) => {
 
         if (crops.length > 0) {
             const cropsInsertQuery = `
-            INSERT INTO crops (farm_id, crop_type, acreage, created_at)
-            VALUES ($1, $2, $3, NOW())
+            INSERT INTO crops (farm_id, crop_type, acreage, planting_date, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
             ON CONFLICT (farm_id, crop_type)
-            DO UPDATE SET acreage = EXCLUDED.acreage
+            DO UPDATE SET
+                acreage = EXCLUDED.acreage,
+                planting_date = EXCLUDED.planting_date
             `;
-            
+
             for (const crop of crops) {
-                await pool.query(cropsInsertQuery, [farm.id, crop.name, crop.acreage]);
+                const plantingDate = crop.plantingDate ?? crop.planting_date ?? null;
+                await pool.query(cropsInsertQuery, [farm.id, crop.name, crop.acreage, plantingDate]);
             }
         }
 
