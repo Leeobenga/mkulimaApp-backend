@@ -1,4 +1,5 @@
 import pool from "../config/db.js";
+import { GROWTH_STAGES } from "../intelligence/cropStage.js";
 import { generateCropInsights } from "../services/cropService.js";
 import {
     getCropIntelligenceHistoryEntries,
@@ -187,12 +188,23 @@ const respondWithCropIntelligence = async ({
         calibration
     });
 
+    const data = insights.map((insight, index) => {
+        const crop = crops[index];
+        return {
+            cropId: crop?.id ?? null,
+            farmId: crop?.farm_id ?? null,
+            acreage: crop?.acreage ?? null,
+            planting_date: crop?.planting_date ?? null,
+            ...insight
+        };
+    });
+
     return res.json({
         success: true,
         county: profile.county,
         subcounty: profile.subcounty,
         weather: weatherData,
-        data: insights,
+        data,
         historySaved,
         historyCount: historyEntries.length,
         historyRunGroupId: historyEntries[0]?.run_group_id ?? null,
@@ -329,5 +341,101 @@ export const getCropIntelligenceHistory = async (req, res) => {
             success: false,
             message: "Failed to fetch crop intelligence history"
         });
+    }
+};
+
+export const updateCrop = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const { cropId } = req.params;
+        const { acreage, planting_date, growth_stage } = req.body;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Not authorized" });
+        }
+
+        if (acreage !== undefined && (typeof acreage !== "number" || acreage <= 0)) {
+            return res.status(400).json({ success: false, message: "Acreage must be a positive number" });
+        }
+
+        if (planting_date !== undefined) {
+            const parsed = new Date(planting_date);
+            if (isNaN(parsed.getTime())) {
+                return res.status(400).json({ success: false, message: "Invalid planting date" });
+            }
+        }
+
+        const validStages = GROWTH_STAGES.filter((s) => s !== "Unknown");
+        if (growth_stage !== undefined && !validStages.includes(growth_stage)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid growth stage. Must be one of: ${validStages.join(", ")}`
+            });
+        }
+
+        if (acreage === undefined && planting_date === undefined && growth_stage === undefined) {
+            return res.status(400).json({ success: false, message: "No fields to update" });
+        }
+
+        const fields = [];
+        const values = [];
+        let idx = 1;
+
+        if (acreage !== undefined)      { fields.push(`c.acreage = $${idx++}`);       values.push(acreage); }
+        if (planting_date !== undefined) { fields.push(`c.planting_date = $${idx++}`); values.push(planting_date); }
+        if (growth_stage !== undefined)  { fields.push(`c.growth_stage = $${idx++}`);  values.push(growth_stage); }
+
+        values.push(cropId, userId);
+
+        const { rows } = await pool.query(
+            `UPDATE crops c
+             SET ${fields.join(", ")}
+             FROM farms f
+             JOIN farmer_profiles fp ON fp.id = f.farmer_profile_id
+             WHERE c.id = $${idx++}
+               AND c.farm_id = f.id
+               AND fp.user_id = $${idx}
+             RETURNING c.id, c.crop_type, c.acreage, c.planting_date, c.growth_stage`,
+            values
+        );
+
+        if (rows.length === 0) {
+            return res.status(404).json({ success: false, message: "Crop not found" });
+        }
+
+        return res.json({ success: true, crop: rows[0] });
+    } catch (error) {
+        console.error("updateCrop error:", error);
+        return res.status(500).json({ success: false, message: "Server error updating crop" });
+    }
+};
+
+export const deleteCrop = async (req, res) => {
+    try {
+        const userId = req.user?.id;
+        const { cropId } = req.params;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Not authorized" });
+        }
+
+        const { rowCount } = await pool.query(
+            `DELETE FROM crops c
+             USING farms f
+             JOIN farmer_profiles fp ON fp.id = f.farmer_profile_id
+             WHERE c.id = $1
+               AND c.farm_id = f.id
+               AND fp.user_id = $2`,
+            [cropId, userId]
+        );
+
+        if (rowCount === 0) {
+            return res.status(404).json({ success: false, message: "Crop not found" });
+        }
+
+        return res.json({ success: true });
+    } catch (error) {
+        console.error("deleteCrop error:", error);
+        return res.status(500).json({ success: false, message: "Server error deleting crop" });
     }
 };
