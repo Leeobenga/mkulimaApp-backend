@@ -27,6 +27,9 @@ Required in `.env`:
 - `REFRESH_TOKEN_TTL` — e.g. `30d` (default `30d`)
 - `VERIFICATION_TTL` — e.g. `1d` (default `1d`)
 
+Cloudinary (required for photo uploads):
+- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
+
 Optional weather overrides (defaults to Open-Meteo public API, Kenya):
 - `WEATHER_GEOCODING_URL`, `WEATHER_FORECAST_URL`, `WEATHER_TIMEOUT_MS`
 - `WEATHER_COUNTRY_CODE`, `WEATHER_TIMEZONE`
