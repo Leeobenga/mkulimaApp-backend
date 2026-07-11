@@ -1,4 +1,5 @@
 import pool from "../config/db.js";
+import cloudinary from "../config/cloudinary.js";
 
 export const getMe = async (req, res) => {
     try {
@@ -10,6 +11,7 @@ export const getMe = async (req, res) => {
                 u.email,
                 u.username,
                 u.phone,
+                u.photo,
                 u.has_completed_setup,
                 fp.county,
                 fp.subcounty
@@ -30,6 +32,7 @@ export const getMe = async (req, res) => {
             email: user.email,
             username: user.username,
             phone: user.phone,
+            photo_url: user.photo ?? null,
             has_completed_setup: user.has_completed_setup,
             location: user.county || user.subcounty
                 ? {
@@ -117,6 +120,40 @@ export const updateMe = async (req, res) => {
     }
 };
 
+
+export const uploadPhoto = async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: "No photo file provided" });
+    }
+
+    try {
+        const photoUrl = await new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+                {
+                    folder:         "mkulima/profile_photos",
+                    public_id:      `user_${req.user.id}`,
+                    overwrite:      true,
+                    transformation: [{ width: 400, height: 400, crop: "fill", gravity: "face" }]
+                },
+                (error, result) => {
+                    if (error) return reject(error);
+                    resolve(result.secure_url);
+                }
+            );
+            stream.end(req.file.buffer);
+        });
+
+        const { rows } = await pool.query(
+            `UPDATE users SET photo = $1 WHERE id = $2 RETURNING photo`,
+            [photoUrl, req.user.id]
+        );
+
+        return res.json({ photo_url: rows[0].photo });
+    } catch (error) {
+        console.error("uploadPhoto error:", error);
+        return res.status(500).json({ error: "Failed to upload photo" });
+    }
+};
 
 export const completeOnboarding = async (req, res) => {
     const userId = req.user.id;
@@ -284,7 +321,8 @@ export const completeOnboarding = async (req, res) => {
             `;
 
             for (const crop of crops) {
-                const plantingDate = crop.plantingDate ?? crop.planting_date ?? null;
+                const rawDate = crop.plantingDate ?? crop.planting_date ?? null;
+                const plantingDate = rawDate && !isNaN(new Date(rawDate).getTime()) ? rawDate : null;
                 await pool.query(cropsInsertQuery, [farm.id, crop.name, crop.acreage, plantingDate]);
             }
         }
