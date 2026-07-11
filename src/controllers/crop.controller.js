@@ -195,6 +195,8 @@ const respondWithCropIntelligence = async ({
             farmId: crop?.farm_id ?? null,
             acreage: crop?.acreage ?? null,
             planting_date: crop?.planting_date ?? null,
+            daysSincePlanting: insight?.riskDetail?.stageContext?.daysSincePlanting ?? null,
+            stageSource: insight?.riskDetail?.stageContext?.source ?? null,
             ...insight
         };
     });
@@ -381,9 +383,17 @@ export const updateCrop = async (req, res) => {
         const values = [];
         let idx = 1;
 
-        if (acreage !== undefined)      { fields.push(`c.acreage = $${idx++}`);       values.push(acreage); }
-        if (planting_date !== undefined) { fields.push(`c.planting_date = $${idx++}`); values.push(planting_date); }
-        if (growth_stage !== undefined)  { fields.push(`c.growth_stage = $${idx++}`);  values.push(growth_stage); }
+        if (acreage !== undefined)       { fields.push(`acreage = $${idx++}`);       values.push(acreage); }
+        if (planting_date !== undefined) { fields.push(`planting_date = $${idx++}`); values.push(planting_date); }
+        // Providing a planting_date hands control back to auto-calculation — clear any
+        // stored explicit stage unless the caller is also explicitly setting a new one.
+        if (planting_date !== undefined && growth_stage === undefined) {
+            fields.push(`growth_stage = $${idx++}`);
+            values.push(null);
+        } else if (growth_stage !== undefined) {
+            fields.push(`growth_stage = $${idx++}`);
+            values.push(growth_stage);
+        }
 
         values.push(cropId, userId);
 
