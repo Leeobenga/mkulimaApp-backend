@@ -23,7 +23,12 @@ const toRainfallRisk = (rainfall) => {
 const getCropWaterRequirements = (cropType) => {
     const requirements = {
         maize: { sensitivity: 'high', criticalStages: ['Reproductive'] },
-        beans: { sensitivity: 'medium', criticalStages: ['Reproductive', 'PodFill'] },
+        beans: { sensitivity: 'high', criticalStages: ['Reproductive', 'Maturity'] },
+        kales: { sensitivity: 'medium', criticalStages: ['Vegetative'] },
+        tomatoes: { sensitivity: 'very_high', criticalStages: ['Reproductive', 'Maturity'] },
+        onions:   { sensitivity: 'high',      criticalStages: ['Vegetative', 'Reproductive'] },
+        cabbage:  { sensitivity: 'high',      criticalStages: ['Vegetative', 'Reproductive'] },
+        spinach:  { sensitivity: 'high',      criticalStages: ['Vegetative'] },
         wheat: { sensitivity: 'medium', criticalStages: ['Reproductive'] },
         rice: { sensitivity: 'very_high', criticalStages: ['Reproductive', 'GrainFill'] },
         unknown: { sensitivity: 'medium', criticalStages: ['Reproductive'] }
