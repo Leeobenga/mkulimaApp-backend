@@ -122,13 +122,13 @@ export const persistCropIntelligenceHistory = async ({
                 normalizeOptionalInteger(insight?.riskScore),
                 normalizeOptionalInteger(insight?.confidenceScore),
                 insight?.riskDetail?.modelVersion ?? null,
-                normalizeArray(insight?.drivers),
-                normalizeArray(insight?.risks),
-                normalizeArray(insight?.recommendations),
-                cropInput,
-                requestContext,
-                normalizeObject(weatherData, {}),
-                resultSnapshot
+                JSON.stringify(normalizeArray(insight?.drivers)),
+                JSON.stringify(normalizeArray(insight?.risks)),
+                JSON.stringify(normalizeArray(insight?.recommendations)),
+                JSON.stringify(cropInput),
+                JSON.stringify(requestContext),
+                JSON.stringify(normalizeObject(weatherData, {})),
+                JSON.stringify(resultSnapshot)
             ]
         );
 
